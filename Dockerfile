@@ -7,12 +7,8 @@ WORKDIR /app
 # Copy the current directory contents into the container at /app
 COPY . /app
 
-# Install any needed packages specified in requirements.txt
-# (You must still create a requirements.txt file)
+# Install any needed packages
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Make the start script executable
-RUN chmod +x start.sh
-
-# Tell the container which command to run when it starts
-CMD ["./start.sh"]
+# Use the Python interpreter as the direct command entry point
+CMD ["python3", "alpaca_bot_current.py"]
