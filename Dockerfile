@@ -1,24 +1,18 @@
-# Use official Python 3.11 image
-
+# Use an official Python runtime as a parent image
 FROM python:3.11-slim
 
-# Set time zone to match your local machine
-
-ENV TZ=America/New_York
-RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy bot code and requirements
-
+# Copy the current directory contents into the container at /app
 COPY . /app
 
-# Install Python packages (add any other dependencies your bot uses)
+# Install any needed packages specified in requirements.txt
+# (You must still create a requirements.txt file)
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir alpaca-trade-api pandas beautifulsoup4 lxml
+# Make the start script executable
+RUN chmod +x start.sh
 
-# Run your bot
-
-CMD ["python", "-u", "alpaca_bot_current.py"]
+# Tell the container which command to run when it starts
+CMD ["./start.sh"]
