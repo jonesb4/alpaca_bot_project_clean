@@ -1,0 +1,11 @@
+{
+    "IXHL": {
+        "buy_price": 0.4555,
+        "shares_remaining": 4408,
+        "stop_loss": 0.43,
+        "take_profit": 0.48999600000000004,
+        "take_profit_hit": false,
+        "trailing_stop": null,
+        "alpaca_sl_order_id": "731909c9-f01e-482d-803d-fc3e0bd9000c"
+    }
+}

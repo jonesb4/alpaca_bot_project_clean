@@ -450,6 +450,7 @@ def analyze_symbol(symbol):
     times = bars.index
 
     # 1. HISTORICAL LOCAL MINIMA DETECTION
+    # (Used ONLY for identifying potential support points, not for breaking the trend)
     minima_prices, minima_times = [], []
     num_historical_bars = len(prices)
 
@@ -458,28 +459,52 @@ def analyze_symbol(symbol):
             left = prices.iloc[i-2:i]
             right = prices.iloc[i+1:i+3]
 
-            if prices.iloc[i] < left.min() and prices.iloc[i] < right.min() * 1.003:
+            # Simplified minima check: Price must be the lowest of 5 consecutive bars
+            if prices.iloc[i] < left.min() and prices.iloc[i] < right.min():
                 minima_prices.append(prices.iloc[i])
                 minima_times.append(times[i])
 
     # 2. BUILD RISING SUPPORTS ARRAY
+    # (This section determines the Count: 4/3)
     supports = []
     last_price = -np.inf
-    last_supports_count = symbol_state[symbol]["last_supports_count"]
-    trend_break_message = None
 
+    # Build the sequence of strictly rising supports from the detected minima
     for t, price in zip(minima_times, minima_prices):
-        current_supports_count = len(supports)
-
         if price > last_price:
             supports.append((t, price))
             last_price = price
         else:
-            if current_supports_count >= 2:
-                trend_break_message = f"🔴 {symbol} | Trend BROKEN at {t.strftime('%H:%M')}@{price:.4f} (Below prior support of {last_price:.4f})."
+            # Trend Broken via a lower minima: Reset the rising sequence to the current low point
+            if len(supports) >= 2:
+                symbol_state[symbol]['trend_break_message'] = f"🔴 {symbol} | Trend BROKEN (Minima sequence reset) at {t.strftime('%H:%M')}@{price:.4f} (Below prior support of {last_price:.4f})."
 
-            supports = [(t, price)]
+            supports = [(t, price)] # Start a new sequence with the current low point
             last_price = price
+
+    # --- NEW FIX: CHECK ALL BARS FOR BREAK BELOW HIGHEST SUPPORT (The Price Action Rule) ---
+    # This implements the user's rule: Break if price closes below the last support
+    if len(supports) > 0:
+        highest_support_price = supports[-1][1]
+        last_support_time = supports[-1][0]
+
+        # Filter all bars that occurred AFTER the last support confirmation time
+        bars_since_last_support = bars[bars.index > last_support_time]
+        
+        # Only proceed if we have bars since the last support was found
+        if not bars_since_last_support.empty:
+            
+            # Check if the lowest close price since that support has broken below it
+            lowest_close_since = bars_since_last_support['close'].min()
+            
+            if lowest_close_since < highest_support_price:
+                # Find the time this break occurred for logging (use the first time)
+                break_time_index = bars_since_last_support['close'].idxmin()
+                
+                # Log the break and force the supports array to be reset to empty (count = 0).
+                symbol_state[symbol]['trend_break_message'] = f"🔴 {symbol} | Trend BROKEN (Price close below support) at {break_time_index.strftime('%H:%M')}@{lowest_close_since:.4f} (Below highest support of {highest_support_price:.4f})."
+                
+                supports = [] # Reset supports to empty because the trend is broken (Count = 0)
 
     # 3. SHORT-TERM TREND SLOPE CALCULATION
     short_slope = 0.0
@@ -493,8 +518,12 @@ def analyze_symbol(symbol):
 
     # FINAL CHECK AND LOGGING HOOK
     final_supports_count = len(supports)
-    if trend_break_message and final_supports_count < last_supports_count:
-        symbol_state[symbol]['trend_break_message'] = trend_break_message
+    if 'trend_break_message' in symbol_state[symbol] and final_supports_count < symbol_state[symbol]["last_supports_count"]:
+        symbol_state[symbol]['trend_break_message'] # Use the message set above
+    elif 'trend_break_message' in symbol_state[symbol]:
+        # Clear message if the count wasn't actually reduced (e.g., if supports[] was already empty)
+        symbol_state[symbol]['trend_break_message'] = None
+
 
     return get_symbol_metrics(symbol, supports, short_slope)
 
@@ -518,11 +547,11 @@ def log_and_execute(metrics, force_log=False):
         force_log = True
 
     # LOGGING
-    should_log = is_first_run or \
-                 new_supports_count != symbol_state[symbol]["last_supports_count"] or \
-                 force_log
+    should_log_analysis = is_first_run or \
+                         new_supports_count != symbol_state[symbol]["last_supports_count"] or \
+                         force_log
 
-    if should_log:
+    if should_log_analysis:
         print()
         support_emoji = "🟢" if new_supports_count == STRATEGY_CONFIG["MIN_REQUIRED_SUPPORT_HITS"] else ("🟡" if new_supports_count > 0 else "⚫")
         slope_emoji = "🟢" if short_slope > 0 else ("🔴" if short_slope < 0 else "⚪")
@@ -549,23 +578,32 @@ def log_and_execute(metrics, force_log=False):
     if rising_supports_met and short_term_trend_positive:
         # Only buy if not currently holding the symbol
         if symbol not in positions or positions[symbol]["shares_remaining"] == 0:
-            if symbol_state[symbol]["last_supports_count"] < STRATEGY_CONFIG["MIN_REQUIRED_SUPPORT_HITS"]:
-                log_trade(f"💰 BUY SIGNAL! {symbol} | 3+ supports confirmed | Short-term trend UP ({short_slope:+.5f})")
+            
+            # --- FIX: LOG THE INTENT TO BUY EVERY TIME THE SIGNAL IS MET ---
+            # This ensures the bot confirms it is attempting to execute the trade
+            if symbol_state[symbol]["last_supports_count"] >= STRATEGY_CONFIG["MIN_REQUIRED_SUPPORT_HITS"]:
+                 log_trade(f"💰 BUY SIGNAL! {symbol} | 3+ supports confirmed | Short-term trend UP ({short_slope:+.5f})")
+            # -----------------------------------------------------------------
 
-                # --- NEW EXECUTION LOGIC ---
-                try:
-                    price = api.get_latest_trade(symbol).price
-                    shares_to_buy = calculate_shares(symbol, price)
+            # --- EXECUTION LOGIC ---
+            try:
+                # CRITICAL: This line will fail if Alpaca does not have a price.
+                price = api.get_latest_trade(symbol).price
+                shares_to_buy = calculate_shares(symbol, price)
 
-                    if shares_to_buy > 0:
-                        place_initial_buy(symbol, shares_to_buy)
-                    else:
-                        log_trade(f"⚠️ Not buying {symbol}: Shares to buy is 0.")
+                if shares_to_buy > 0:
+                    place_initial_buy(symbol, shares_to_buy)
+                else:
+                    log_trade(f"⚠️ Not buying {symbol}: Shares to buy is 0.")
 
-                except Exception as e:
-                    log_trade(f"❌ Buy setup failed for {symbol}: Could not get latest price or snapshot data. Error: {e}")
-                # --- END NEW EXECUTION LOGIC ---
+            except Exception as e:
+                # This log ensures you see the error when the buy fails.
+                log_trade(f"❌ Buy setup failed for {symbol}: Could not get latest price or snapshot data. Error: {e}")
+            # --- END EXECUTION LOGIC ---
 
+
+# ---------------- TRADING EXECUTION ----------------
+# ... (rest of the file remains the same)
 
 # ---------------- TRADING EXECUTION ----------------
 def place_initial_buy(symbol, shares):
