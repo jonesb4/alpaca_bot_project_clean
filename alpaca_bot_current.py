@@ -60,6 +60,23 @@ except KeyError as e:
     TELEGRAM_BOT_TOKEN = None
     TELEGRAM_CHAT_ID = None
     TELEGRAM_ENABLED = False
+
+    print("bot initialized") # This is when you send your text!
+
+while True:
+    try:
+        # 1. Place your core trading logic function call here
+        perform_trade_check() 
+        
+        # 2. Wait for a set amount of time before the next check
+        print(f"[{datetime.datetime.now()}] Sleeping for 5 minutes...")
+        time.sleep(300) # Sleeps for 300 seconds (5 minutes)
+
+    except Exception as e:
+        # Crucial: Catch errors and print them so they appear in logs!
+        print(f"An error occurred during runtime: {e}")
+        # Consider a small sleep to avoid thrashing restarts
+        time.sleep(10)
 # ------------------------------------------------------------------------
 
 # Global State Variables
