@@ -7,7 +7,7 @@ WORKDIR /app
 # Copy the current directory contents into the container at /app
 COPY . /app
 
-# Install any needed packages
+# Install any needed packages (requires your requirements.txt file)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Use the Python interpreter as the direct command entry point
